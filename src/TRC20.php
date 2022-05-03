@@ -22,6 +22,7 @@ class TRC20 extends TRX
             '',
             $this->tron->address2HexString($config['contract_address'])
         );
+        
         $this->decimals = $config['decimals'];
     }
 
@@ -88,6 +89,51 @@ class TRC20 extends TRX
             );
         } else {
             throw new TransactionException(hex2bin($response['result']['message']));
+        }
+    }
+    
+    public function transferFrom(Address $caller, Address $from, Address $to, float $amount): Transaction
+    {
+        $this->tron->setAddress($caller->address);
+        $this->tron->setPrivateKey($caller->privateKey);
+
+        $fromFormat = Formatter::toAddressFormat($from->hexAddress);
+        $toFormat = Formatter::toAddressFormat($to->hexAddress);
+        try {
+            $amount = Utils::toMinUnitByDecimals($amount, $this->decimals);
+        } catch (InvalidArgumentException $e) {
+            throw new TronErrorException($e->getMessage());
+        }
+        $numberFormat = Formatter::toIntegerFormat($amount);
+
+        $body = $this->_api->post('/wallet/triggersmartcontract', [
+            'contract_address' => $this->contractAddress->hexAddress,
+            'function_selector' => 'transferFrom(address,address,uint256)',
+            'parameter' => "{$fromFormat}{$toFormat}{$numberFormat}",
+            'fee_limit' => 100000000,
+            'call_value' => 0,
+            'owner_address' => $caller->hexAddress,
+        ], true);
+
+        if (isset($body['result']['code'])) {
+            throw new TransactionException(hex2bin($body['result']['message']));
+        }
+
+        try {
+            $tradeobj = $this->tron->signTransaction($body['transaction']);
+            $response = $this->tron->sendRawTransaction($tradeobj);
+        } catch (TronException $e) {
+            throw new TransactionException($e->getMessage(), $e->getCode());
+        }
+
+        if (isset($response['result']) && $response['result'] == true) {
+            return new Transaction(
+                $body['transaction']['txID'],
+                $body['transaction']['raw_data'],
+                'PACKING'
+            );
+        } else {
+            throw new TransactionException('Transfer Fail');
         }
     }
 }
